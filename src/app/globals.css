@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/*
+ * ── Artifex Studio design system ─────────────────────────────────────────
+ * A calm, layered dark theme (surfaces step up in lightness toward the user).
+ * Teal accent — easy on the eyes, family-friendly. Adapted from candy.oh's
+ * token system, re-themed and stripped of its NSFW/glamour framing.
+ */
+:root {
+  color-scheme: dark;
+
+  /* Base surfaces (deepest → most elevated) */
+  --bg: #0a0f0e;
+  --bg-elevated: #0f1614;
+  --surface: #141d1b;
+  --surface-2: #1b2624;
+  --surface-3: #243130;
+
+  /* Hairlines */
+  --border: #28332f;
+  --border-strong: #36453f;
+
+  /* Text */
+  --fg: #f1f6f4;
+  --fg-muted: #9db0aa;
+  --fg-subtle: #6a7c76;
+
+  /* Accent ramp (teal) */
+  --accent: #14b8a6;
+  --accent-hover: #2dd4bf;
+  --accent-press: #0d9488;
+  --accent-soft: rgba(20, 184, 166, 0.14);
+  --accent-ring: rgba(20, 184, 166, 0.45);
+  --accent-fg: #04221e;
+
+  /* Secondary accent (sky) for variety */
+  --sky: #38bdf8;
+  --sky-soft: rgba(56, 189, 248, 0.14);
+
+  /* Semantic */
+  --danger: #f43f5e;
+  --danger-soft: rgba(244, 63, 94, 0.14);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245, 158, 11, 0.14);
+  --success: #34d399;
+  --success-soft: rgba(52, 211, 153, 0.14);
+
+  /* Radii */
+  --radius-sm: 0.5rem;
+  --radius: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 6px 20px -4px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 18px 50px -12px rgba(0, 0, 0, 0.65);
+  --shadow-accent: 0 8px 30px -8px rgba(20, 184, 166, 0.4);
+
+  /* Gradients */
+  --grad-accent: linear-gradient(135deg, #14b8a6 0%, #0ea5e9 100%);
+
+  /* Motion */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur: 180ms;
+
+  /* Legacy aliases (so reused candy.oh primitives keep rendering) */
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-border: var(--border);
+  --accent-foreground: var(--accent-fg);
+  --muted: var(--fg-muted);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-fg);
+  --color-sky: var(--sky);
+  --color-danger: var(--danger);
+  --color-warn: var(--warn);
+  --color-success: var(--success);
+
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-card: var(--surface);
+  --color-card-border: var(--border);
+  --color-muted: var(--fg-muted);
+
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+}
+
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  /* Subtle ambient depth so the flat black doesn't feel dead. */
+  background-image:
+    radial-gradient(900px 500px at 100% -5%, rgba(20, 184, 166, 0.06), transparent 60%),
+    radial-gradient(800px 480px at -5% 110%, rgba(56, 189, 248, 0.05), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 999px; border: 2px solid transparent; background-clip: content-box; }
+
+/* Animations */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes slide-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.animate-fade-in { animation: fade-in var(--dur) var(--ease); }
+.animate-slide-up { animation: slide-up var(--dur) var(--ease); }
+
+::selection { background: var(--accent-soft); }

@@ -1,0 +1,67 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { artifexFetch } from "@/lib/artifex";
+import { runQueued } from "@/lib/queue";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const Body = z.object({
+  model: z.string().min(1),
+  prompt: z.string().min(1).max(2000),
+  negative: z.string().max(2000).optional(),
+  style: z.string().optional(),
+  sampler: z.string().optional(),
+  scheduler: z.string().optional(),
+  steps: z.number().int().min(1).max(80).optional(),
+  cfg: z.number().min(1).max(20).optional(),
+  width: z.number().int().min(256).max(2048),
+  height: z.number().int().min(256).max(2048),
+  seed: z.number().int().optional(),
+});
+
+/** Build the Artifex prompt DSL: sampler/scheduler/steps/cfg/style/seed ride on
+ *  the prompt; size + negative are top-level fields. */
+function buildPrompt(b: z.infer<typeof Body>): string {
+  const parts = [b.prompt.trim()];
+  if (b.style) parts.push(`--style ${b.style}`);
+  if (b.sampler) parts.push(`--sampler ${b.sampler}`);
+  if (b.scheduler) parts.push(`--scheduler ${b.scheduler}`);
+  if (b.steps) parts.push(`--steps ${b.steps}`);
+  if (b.cfg) parts.push(`--cfg ${b.cfg}`);
+  if (b.seed !== undefined) parts.push(`--seed ${b.seed}`);
+  return parts.join(" ");
+}
+
+export async function POST(req: NextRequest) {
+  const parsed = Body.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "invalid request" }, { status: 400 });
+  }
+  const b = parsed.data;
+  const payload = {
+    model: b.model,
+    prompt: buildPrompt(b),
+    size: `${b.width}x${b.height}`,
+    ...(b.negative && b.negative.trim() ? { negative_prompt: b.negative.trim() } : {}),
+  };
+
+  try {
+    const data = await runQueued(async () => {
+      // Generous timeout — a render (esp. low-VRAM offload) can take a while.
+      const r = await artifexFetch(
+        "/v1/images/generations",
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
+        600000,
+      );
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message ?? j?.error ?? "generation failed");
+      return j;
+    });
+    const b64 = data?.data?.[0]?.b64_json;
+    if (!b64) throw new Error("engine returned no image");
+    return NextResponse.json({ image: `data:image/png;base64,${b64}` });
+  } catch (e) {
+    return NextResponse.json({ error: (e as Error).message }, { status: 502 });
+  }
+}
