@@ -10,7 +10,12 @@ interface TrainImg { id: string; dataUrl: string; caption: string }
 interface Job { job_id: string; state: string; step?: number; total?: number; loss?: number | null; lora?: string | null; error?: string | null }
 
 const inp = "w-full rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] px-3 py-2 text-sm focus:border-[var(--accent)] outline-none";
-const SIZES = [{ label: "Portrait 832×1216", w: 832, h: 1216 }, { label: "Square 1024×1024", w: 1024, h: 1024 }];
+const SIZES = [
+  { label: "Small 512×768 (8 GB-friendly)", w: 512, h: 768 },
+  { label: "Compact 640×896", w: 640, h: 896 },
+  { label: "Portrait 832×1216 (needs more VRAM)", w: 832, h: 1216 },
+  { label: "Square 1024×1024", w: 1024, h: 1024 },
+];
 
 export default function TrainPage() {
   const [models, setModels] = useState<string[]>([]);
