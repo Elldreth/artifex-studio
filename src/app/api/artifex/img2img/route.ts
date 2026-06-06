@@ -11,13 +11,13 @@ const Body = z.object({
   model: z.string().min(1),
   prompt: z.string().min(1).max(2000),
   negative: z.string().max(2000).optional(),
+  image: z.string().min(10), // data URL / base64 / http url (the source frame)
+  strength: z.number().min(0.05).max(1),
   style: z.string().optional(),
   sampler: z.string().optional(),
   scheduler: z.string().optional(),
   steps: z.number().int().min(1).max(80).optional(),
   cfg: z.number().min(1).max(20).optional(),
-  width: z.number().int().min(256).max(2048),
-  height: z.number().int().min(256).max(2048),
   seed: z.number().int().optional(),
 });
 
@@ -30,20 +30,20 @@ export async function POST(req: NextRequest) {
   const payload = {
     model: b.model,
     prompt: buildDslPrompt(b),
-    size: `${b.width}x${b.height}`,
+    image: b.image,
+    strength: b.strength,
     ...(b.negative && b.negative.trim() ? { negative_prompt: b.negative.trim() } : {}),
   };
 
   try {
     const data = await runQueued(async () => {
-      // Generous timeout — a render (esp. low-VRAM offload) can take a while.
       const r = await artifexFetch(
-        "/v1/images/generations",
+        "/v1/images/img2img",
         { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) },
         600000,
       );
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.error?.message ?? j?.error ?? "generation failed");
+      if (!r.ok) throw new Error(j?.error?.message ?? j?.error ?? "img2img failed");
       return j;
     });
     const b64 = data?.data?.[0]?.b64_json;

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Wand2, Images, Menu, X } from "lucide-react";
+import { Wand2, Images, ImagePlus, Menu, X } from "lucide-react";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { HealthChip } from "@/components/HealthChip";
 
@@ -16,6 +16,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { href: "/", label: "Generate", icon: Wand2, match: (p) => p === "/" },
+  { href: "/img2img", label: "Image to image", icon: ImagePlus, match: (p) => p.startsWith("/img2img") },
   { href: "/gallery", label: "Gallery", icon: Images, match: (p) => p.startsWith("/gallery") },
 ];
 

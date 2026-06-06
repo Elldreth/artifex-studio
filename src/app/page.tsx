@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { saveItem } from "@/lib/db";
+import { uid } from "@/lib/uid";
 
 interface Options {
   reachable: boolean;
@@ -29,15 +30,6 @@ const ASPECTS = [
 ];
 
 const DEFAULT_NEG = "lowres, worst quality, low quality, blurry, bad anatomy, nsfw, nude, explicit";
-
-/** crypto.randomUUID() only exists in secure contexts (https/localhost). On a
- *  plain-http LAN origin it's undefined, so fall back to a timestamp+random id. */
-function uid(): string {
-  try {
-    if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
-  } catch { /* not a secure context */ }
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
 const inp = "w-full rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] px-3 py-2 text-sm focus:border-[var(--accent)] outline-none transition-colors";
 
 export default function GeneratePage() {
