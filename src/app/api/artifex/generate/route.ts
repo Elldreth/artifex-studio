@@ -19,6 +19,7 @@ const Body = z.object({
   width: z.number().int().min(256).max(2048),
   height: z.number().int().min(256).max(2048),
   seed: z.number().int().optional(),
+  loras: z.array(z.object({ name: z.string(), weight: z.number() })).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -32,6 +33,7 @@ export async function POST(req: NextRequest) {
     prompt: buildDslPrompt(b),
     size: `${b.width}x${b.height}`,
     ...(b.negative && b.negative.trim() ? { negative_prompt: b.negative.trim() } : {}),
+    ...(b.loras && b.loras.length ? { loras: b.loras } : {}),
   };
 
   try {

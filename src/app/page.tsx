@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon } from "lucide-react";
+import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon, Layers } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
@@ -45,6 +45,8 @@ export default function GeneratePage() {
   const [aspect, setAspect] = useState(ASPECTS[0]);
   const [seed, setSeed] = useState("");
   const [seedLocked, setSeedLocked] = useState(false);
+  const [allLoras, setAllLoras] = useState<string[]>([]);
+  const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]);
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -61,7 +63,14 @@ export default function GeneratePage() {
         setScheduler(d.defaultSampler?.scheduler ?? "");
       })
       .catch(() => setOpt({ reachable: false }));
+    fetch("/api/artifex/loras", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setAllLoras((d.loras ?? []).map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string; file?: string }).name ?? (l as { file?: string }).file ?? "")).filter(Boolean)))
+      .catch(() => {});
   }, []);
+
+  const toggleLora = (name: string) =>
+    setLoras((p) => (p.some((l) => l.name === name) ? p.filter((l) => l.name !== name) : [...p, { name, weight: 0.8 }]));
 
   // Poll progress while a generation is in flight.
   useEffect(() => {
@@ -92,6 +101,7 @@ export default function GeneratePage() {
           model, prompt, negative, style: style || undefined,
           sampler: sampler || undefined, scheduler: scheduler || undefined,
           steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed,
+          loras: loras.length ? loras : undefined,
         }),
       });
       const d = await r.json();
@@ -99,7 +109,7 @@ export default function GeneratePage() {
       setImage(d.image);
       saveItem({
         id: uid(), dataUrl: d.image, prompt, negative, model,
-        settings: { style, sampler, scheduler, steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed },
+        settings: { style, sampler, scheduler, steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed, loras: loras.map((l) => `${l.name}:${l.weight}`).join(", ") || undefined },
         ts: Date.now(),
       }).catch((e) => console.error("history save failed", e));
       toast.success("Generated");
@@ -108,7 +118,7 @@ export default function GeneratePage() {
     } finally {
       setBusy(false); setProg(null);
     }
-  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked]);
+  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras]);
 
   const queued = (prog?.inflight ?? 0) > 1;
 
@@ -182,6 +192,30 @@ export default function GeneratePage() {
               </button>
             </div>
           </Field>
+
+          {allLoras.length > 0 && (
+            <Field label="LoRAs">
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-2 space-y-1.5 max-h-44 overflow-y-auto">
+                {allLoras.map((nm) => {
+                  const sel = loras.find((l) => l.name === nm);
+                  return (
+                    <div key={nm} className="flex items-center gap-2 text-sm">
+                      <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                        <input type="checkbox" checked={!!sel} onChange={() => toggleLora(nm)} className="accent-[var(--accent)]" />
+                        <span className="truncate">{nm}</span>
+                      </label>
+                      {sel && (
+                        <input type="range" min={0} max={1.5} step={0.05} value={sel.weight}
+                          onChange={(e) => setLoras((p) => p.map((l) => (l.name === nm ? { ...l, weight: Number(e.target.value) } : l)))}
+                          className="w-24 accent-[var(--accent)]" title={`weight ${sel.weight}`} />
+                      )}
+                      {sel && <span className="text-xs text-[var(--fg-subtle)] w-8 text-right">{sel.weight}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </Field>
+          )}
 
           <button onClick={generate} disabled={busy || !opt?.reachable}
             className="w-full h-11 rounded-xl bg-[var(--accent)] text-[var(--accent-fg)] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[var(--accent-hover)] transition-colors shadow-[var(--shadow-accent)]">

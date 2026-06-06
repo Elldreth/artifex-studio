@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
-import { Wand2, Images, ImagePlus, ScanFace, SlidersHorizontal, Menu, X } from "lucide-react";
+import { Wand2, Images, ImagePlus, ScanFace, SlidersHorizontal, GraduationCap, Layers, Tags, Menu, X } from "lucide-react";
 import { Wordmark } from "@/components/brand/Wordmark";
 import { HealthChip } from "@/components/HealthChip";
 
@@ -18,6 +18,9 @@ const NAV: NavItem[] = [
   { href: "/", label: "Generate", icon: Wand2, match: (p) => p === "/" },
   { href: "/img2img", label: "Image to image", icon: ImagePlus, match: (p) => p.startsWith("/img2img") },
   { href: "/detailer", label: "Detailer", icon: ScanFace, match: (p) => p.startsWith("/detailer") },
+  { href: "/train", label: "Train LoRA", icon: GraduationCap, match: (p) => p.startsWith("/train") },
+  { href: "/loras", label: "LoRAs", icon: Layers, match: (p) => p.startsWith("/loras") },
+  { href: "/tagger", label: "Tagger", icon: Tags, match: (p) => p.startsWith("/tagger") },
   { href: "/gallery", label: "Gallery", icon: Images, match: (p) => p.startsWith("/gallery") },
   { href: "/models", label: "Model profiles", icon: SlidersHorizontal, match: (p) => p.startsWith("/models") },
 ];
