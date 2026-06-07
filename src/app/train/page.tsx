@@ -7,7 +7,13 @@ import { PageHeader } from "@/components/PageHeader";
 import { uid } from "@/lib/uid";
 
 interface TrainImg { id: string; dataUrl: string; caption: string }
-interface Job { job_id: string; state: string; step?: number; total?: number; loss?: number | null; lora?: string | null; error?: string | null }
+interface Job {
+  job_id: string; state: string; step?: number; total?: number; loss?: number | null;
+  lora?: string | null; error?: string | null;
+  loss_history?: { step: number; loss: number }[];
+  tags?: [string, number][];
+  buckets?: Record<string, number>;
+}
 
 const inp = "w-full rounded-lg bg-[var(--bg-elevated)] border border-[var(--border)] px-3 py-2 text-sm focus:border-[var(--accent)] outline-none";
 const SIZES = [
@@ -195,10 +201,79 @@ export default function TrainPage() {
           )}
         </div>
       </div>
+
+      {job && <TrainInsight job={job} />}
     </div>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return <div><label className="block text-xs text-[var(--fg-muted)] mb-1">{label}</label>{children}</div>;
+}
+
+function TrainInsight({ job }: { job: Job }) {
+  const hist = job.loss_history ?? [];
+  const tags = job.tags ?? [];
+  const buckets = Object.entries(job.buckets ?? {});
+  if (hist.length === 0 && tags.length === 0 && buckets.length === 0) return null;
+  return (
+    <div className="mt-5 grid lg:grid-cols-[1fr_360px] gap-5">
+      {/* Loss curve */}
+      <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+        <div className="text-sm font-medium mb-2">Loss</div>
+        {hist.length >= 2 ? <LossChart points={hist} /> : <p className="text-xs text-[var(--fg-subtle)]">Collecting loss samples…</p>}
+        {hist.length > 0 && (
+          <div className="text-xs text-[var(--fg-subtle)] mt-2">
+            latest {hist[hist.length - 1].loss.toFixed(4)} · {hist.length} samples
+          </div>
+        )}
+      </div>
+      {/* Distributions */}
+      <div className="space-y-4">
+        {buckets.length > 0 && (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="text-sm font-medium mb-2">Aspect buckets</div>
+            <div className="flex flex-wrap gap-1.5">
+              {buckets.sort((a, b) => b[1] - a[1]).map(([k, c]) => (
+                <span key={k} className="px-2 py-0.5 rounded-full bg-[var(--surface-2)] border border-[var(--border)] text-xs">{k} ×{c}</span>
+              ))}
+            </div>
+          </div>
+        )}
+        {tags.length > 0 && (
+          <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-4">
+            <div className="text-sm font-medium mb-2">Concept distribution <span className="text-[10px] text-[var(--fg-subtle)] font-normal">(rarer = sampled more)</span></div>
+            <div className="space-y-1.5">
+              {(() => { const max = Math.max(...tags.map((t) => t[1])); return tags.map(([t, c]) => (
+                <div key={t} className="flex items-center gap-2 text-xs">
+                  <span className="w-28 truncate text-[var(--fg-muted)]" title={t}>{t}</span>
+                  <div className="flex-1 h-2 rounded-full bg-[var(--bg-elevated)] overflow-hidden">
+                    <div className="h-full bg-[var(--accent)]" style={{ width: `${(c / max) * 100}%` }} />
+                  </div>
+                  <span className="w-6 text-right text-[var(--fg-subtle)]">{c}</span>
+                </div>
+              )); })()}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Tiny dependency-free SVG line chart for the loss curve. */
+function LossChart({ points }: { points: { step: number; loss: number }[] }) {
+  const W = 600, H = 140, pad = 6;
+  const xs = points.map((p) => p.step);
+  const ys = points.map((p) => p.loss);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const sx = (x: number) => pad + ((x - minX) / Math.max(1, maxX - minX)) * (W - 2 * pad);
+  const sy = (y: number) => pad + (1 - (y - minY) / Math.max(1e-9, maxY - minY)) * (H - 2 * pad);
+  const d = points.map((p, i) => `${i === 0 ? "M" : "L"}${sx(p.step).toFixed(1)},${sy(p.loss).toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" preserveAspectRatio="none">
+      <path d={d} fill="none" stroke="var(--accent)" strokeWidth={2} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
 }
