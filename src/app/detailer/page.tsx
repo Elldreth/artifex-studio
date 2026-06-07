@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { ScanFace, Upload, X, Download } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { DetailerStack, cleanSlot, type Slot, type Detector } from "@/components/DetailerStack";
+import { LoraPicker, type LoraSel } from "@/components/LoraPicker";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
 
@@ -23,6 +24,8 @@ export default function DetailerPage() {
   const [basePrompt, setBasePrompt] = useState("");
   const [sampler, setSampler] = useState("");
   const [scheduler, setScheduler] = useState("");
+  const [allLoras, setAllLoras] = useState<string[]>([]);
+  const [loras, setLoras] = useState<LoraSel[]>([]);
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -40,6 +43,9 @@ export default function DetailerPage() {
       setSampler(d.defaultSampler?.sampler ?? "");
       setScheduler(d.defaultSampler?.scheduler ?? "");
     }).catch(() => {});
+    fetch("/api/artifex/loras", { cache: "no-store" }).then((r) => r.json())
+      .then((d) => setAllLoras((d.loras ?? []).map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string; file?: string }).name ?? (l as { file?: string }).file ?? "")).filter(Boolean)))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -64,7 +70,7 @@ export default function DetailerPage() {
     try {
       const r = await fetch("/api/artifex/detail", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: src, model: model || undefined, basePrompt, sampler: sampler || undefined, scheduler: scheduler || undefined, pipeline: stack.map(cleanSlot) }),
+        body: JSON.stringify({ image: src, model: model || undefined, basePrompt, sampler: sampler || undefined, scheduler: scheduler || undefined, pipeline: stack.map(cleanSlot), loras: loras.length ? loras : undefined }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "detailing failed");
@@ -74,7 +80,7 @@ export default function DetailerPage() {
       toast.success(`Detailed${applied ? ` · ${applied}` : ""}`);
     } catch (e) { toast.error((e as Error).message); }
     finally { setBusy(false); setProg(null); }
-  }, [src, stack, model, basePrompt, sampler, scheduler]);
+  }, [src, stack, model, basePrompt, sampler, scheduler, loras]);
 
   const queued = (prog?.inflight ?? 0) > 1;
 
@@ -142,6 +148,7 @@ export default function DetailerPage() {
             <div className="text-sm font-medium mb-1">Detector stack</div>
             <DetailerStack value={stack} onChange={setStack} detectors={reg?.detectors ?? []} registry={reg?.detailers ?? []} generic={reg?.generic ?? {}} />
           </div>
+          <LoraPicker all={allLoras} value={loras} onChange={setLoras} />
           <button onClick={run} disabled={busy || !reg?.reachable}
             className="w-full h-11 rounded-xl bg-[var(--accent)] text-[var(--accent-fg)] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 hover:bg-[var(--accent-hover)] transition-colors shadow-[var(--shadow-accent)]">
             <ScanFace size={17} /> {busy ? "Detailing…" : "Run detailer"}

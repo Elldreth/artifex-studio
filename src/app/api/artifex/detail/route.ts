@@ -15,6 +15,7 @@ const Body = z.object({
   scheduler: z.string().optional(),
   seed: z.number().int().optional(),
   pipeline: z.array(z.record(z.string(), z.unknown())).min(1),
+  loras: z.array(z.object({ name: z.string(), weight: z.number() })).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     ...(b.sampler ? { sampler: b.sampler } : {}),
     ...(b.scheduler ? { scheduler: b.scheduler } : {}),
     ...(b.seed !== undefined ? { seed: b.seed } : {}),
+    ...(b.loras && b.loras.length ? { loras: b.loras } : {}),
     pipeline: b.pipeline,
   };
 
