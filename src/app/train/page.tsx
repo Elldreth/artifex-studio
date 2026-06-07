@@ -1,12 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { GraduationCap, Upload, X, Sparkles, Loader2 } from "lucide-react";
+import { GraduationCap, Upload, X, Sparkles, Loader2, AlertTriangle, ArrowDownWideNarrow } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { uid } from "@/lib/uid";
 
 interface TrainImg { id: string; dataUrl: string; caption: string }
+
+// Meta/quality cruft to strip from auto-captions (mirrors the engine's set).
+const META_TAGS = new Set(["highres", "absurdres", "lowres", "hires", "commentary", "commentary request", "english commentary", "artist name", "artist request", "signature", "watermark", "username", "web address", "dated", "logo", "character request", "copyright request", "copyright name", "bad id", "bad pixiv id", "md5 mismatch", "jpeg artifacts", "translated", "translation request", "reference sheet", "multiple views"]);
+const parseTags = (c: string) => c.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+const pruneJunk = (tags: string[]) => tags.filter((t) => !META_TAGS.has(t.trim().toLowerCase()));
 interface Job {
   job_id: string; state: string; step?: number; total?: number; loss?: number | null;
   lora?: string | null; error?: string | null;
@@ -34,6 +39,9 @@ export default function TrainPage() {
   const [alpha, setAlpha] = useState(8);
   const [lr, setLr] = useState(0.0001);
   const [captionImages, setCaptionImages] = useState(true);
+  const [pruneTags, setPruneTags] = useState(true);
+  const [sampling, setSampling] = useState("balance");
+  const [sortOutliers, setSortOutliers] = useState(false);
   const [size, setSize] = useState(SIZES[0]);
   const [tte, setTte] = useState(false);
   const [captioning, setCaptioning] = useState(false);
@@ -74,6 +82,35 @@ export default function TrainPage() {
     return () => { alive = false; clearInterval(id); };
   }, [job]);
 
+  // Tag-cohesion per image (for outlier review): how mainstream each image's
+  // tags are vs the whole set. Low = outlier — review/remove. Only meaningful
+  // once images are captioned.
+  const cohesion = useMemo(() => {
+    const freq = new Map<string, number>();
+    const tagsById = new Map<string, string[]>();
+    let captioned = 0;
+    for (const im of imgs) {
+      const tags = pruneJunk(parseTags(im.caption));
+      tagsById.set(im.id, tags);
+      if (tags.length) captioned++;
+      for (const t of new Set(tags)) freq.set(t, (freq.get(t) ?? 0) + 1);
+    }
+    const N = Math.max(1, captioned);
+    const score = new Map<string, number>();
+    for (const im of imgs) {
+      const tags = tagsById.get(im.id) ?? [];
+      score.set(im.id, tags.length ? tags.reduce((s, t) => s + (freq.get(t) ?? 0) / N, 0) / tags.length : 1);
+    }
+    const vals = [...score.values()];
+    const mean = vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length);
+    return { score, isOutlier: (id: string) => captioned > 2 && (score.get(id) ?? 1) < 0.55 * mean, active: captioned > 2 };
+  }, [imgs]);
+
+  const ordered = useMemo(
+    () => (sortOutliers ? [...imgs].sort((a, b) => (cohesion.score.get(a.id) ?? 1) - (cohesion.score.get(b.id) ?? 1)) : imgs),
+    [imgs, sortOutliers, cohesion],
+  );
+
   const addFiles = (files: FileList | File[]) => {
     [...files].filter((f) => f.type.startsWith("image/")).forEach((f) => {
       const fr = new FileReader();
@@ -90,12 +127,17 @@ export default function TrainPage() {
         try {
           const r = await fetch("/api/artifex/tag", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: im.dataUrl }) });
           const d = await r.json();
-          if (r.ok) { const cap = (d.all ?? d.general ?? []).join(", "); setImgs((p) => p.map((x) => (x.id === im.id ? { ...x, caption: cap } : x))); }
+          if (r.ok) {
+            let tags: string[] = d.all ?? d.general ?? [];
+            if (pruneTags) tags = pruneJunk(tags);
+            const cap = tags.join(", ");
+            setImgs((p) => p.map((x) => (x.id === im.id ? { ...x, caption: cap } : x)));
+          }
         } catch { /* skip */ }
       }
       toast.success("Captioned (blank ones auto-fill at train time too)");
     } finally { setCaptioning(false); }
-  }, [imgs]);
+  }, [imgs, pruneTags]);
 
   const start = useCallback(async () => {
     if (!name.trim()) return toast.error("Name your LoRA");
@@ -106,17 +148,18 @@ export default function TrainPage() {
         body: JSON.stringify({
           name: name.trim(), model, trigger: trigger.trim() || undefined,
           images: imgs.map((i) => i.dataUrl), captions: imgs.map((i) => i.caption),
-          autoCaption: captionImages, steps, rank, alpha, lr, width: size.w, height: size.h, train_text_encoder: tte,
+          autoCaption: captionImages, pruneTags, sampling, steps, rank, alpha, lr, width: size.w, height: size.h, train_text_encoder: tte,
         }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "could not start training");
       setJob(j); toast.success("Training started");
     } catch (e) { toast.error((e as Error).message); }
-  }, [name, model, trigger, imgs, captionImages, steps, rank, alpha, lr, size, tte]);
+  }, [name, model, trigger, imgs, captionImages, pruneTags, sampling, steps, rank, alpha, lr, size, tte]);
 
   const running = job && job.state !== "completed" && job.state !== "failed";
   const pct = job?.total ? Math.round(((job.step ?? 0) / job.total) * 100) : 0;
+  const outlierCount = imgs.filter((im) => cohesion.isOutlier(im.id)).length;
 
   return (
     <div className="animate-fade-in">
@@ -130,8 +173,17 @@ export default function TrainPage() {
         {/* Images + captions */}
         <div>
           <div className="flex items-center justify-between mb-2">
-            <label className="text-xs text-[var(--fg-muted)]">Training images ({imgs.length})</label>
+            <label className="text-xs text-[var(--fg-muted)]">
+              Training images ({imgs.length})
+              {cohesion.active && outlierCount > 0 && <span className="text-[var(--warn)]"> · {outlierCount} outlier{outlierCount > 1 ? "s" : ""}</span>}
+            </label>
             <div className="flex gap-2">
+              {cohesion.active && outlierCount > 0 && (
+                <button onClick={() => setSortOutliers((v) => !v)} title="Sort least-cohesive (likely outliers) to the top to review/remove"
+                  className={`text-xs px-2.5 py-1 rounded-lg border flex items-center gap-1 ${sortOutliers ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] hover:border-[var(--accent)]"}`}>
+                  <ArrowDownWideNarrow size={13} /> Outliers
+                </button>
+              )}
               {captionImages && (
                 <button onClick={autoCaption} disabled={captioning || imgs.length === 0}
                   className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] flex items-center gap-1 disabled:opacity-50">
@@ -150,15 +202,21 @@ export default function TrainPage() {
             </button>
           ) : (
             <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-              {imgs.map((im) => (
-                <div key={im.id} className="flex gap-2 items-start rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-2">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={im.dataUrl} alt="" className="w-16 h-16 object-cover rounded shrink-0" />
-                  <textarea className={`${inp} min-h-[64px] text-xs resize-y`} placeholder="caption (blank → auto WD14 at train time)" value={im.caption}
-                    onChange={(e) => setImgs((p) => p.map((x) => (x.id === im.id ? { ...x, caption: e.target.value } : x)))} />
-                  <button onClick={() => setImgs((p) => p.filter((x) => x.id !== im.id))} className="text-[var(--fg-muted)] hover:text-[var(--danger)] p-1"><X size={14} /></button>
-                </div>
-              ))}
+              {ordered.map((im) => {
+                const out = cohesion.isOutlier(im.id);
+                return (
+                  <div key={im.id} className={`flex gap-2 items-start rounded-lg border bg-[var(--bg-elevated)] p-2 ${out ? "border-[var(--warn)]" : "border-[var(--border)]"}`}>
+                    <div className="relative shrink-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={im.dataUrl} alt="" className="w-16 h-16 object-cover rounded" />
+                      {out && <span className="absolute -top-1 -left-1 bg-[var(--warn)] text-black rounded-full p-0.5" title="Tag outlier — review or remove"><AlertTriangle size={11} /></span>}
+                    </div>
+                    <textarea className={`${inp} min-h-[64px] text-xs resize-y`} placeholder="caption (blank → auto WD14 at train time)" value={im.caption}
+                      onChange={(e) => setImgs((p) => p.map((x) => (x.id === im.id ? { ...x, caption: e.target.value } : x)))} />
+                    <button onClick={() => setImgs((p) => p.filter((x) => x.id !== im.id))} className="text-[var(--fg-muted)] hover:text-[var(--danger)] p-1"><X size={14} /></button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -175,6 +233,13 @@ export default function TrainPage() {
             <Field label="Rank"><input type="number" className={inp} value={rank} onChange={(e) => setRank(Number(e.target.value))} /></Field>
             <Field label="Alpha"><input type="number" className={inp} value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} /></Field>
           </div>
+          <Field label="Sampling">
+            <select className={inp} value={sampling} onChange={(e) => setSampling(e.target.value)}>
+              <option value="uniform">Uniform (every image equally)</option>
+              <option value="balance">Balance rare concepts (flexible character)</option>
+              <option value="cohesion">Favor core concept (tight look / style)</option>
+            </select>
+          </Field>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-2.5 space-y-2">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" checked={captionImages} onChange={(e) => setCaptionImages(e.target.checked)} className="accent-[var(--accent)]" />
@@ -182,6 +247,12 @@ export default function TrainPage() {
             </label>
             {!captionImages && (
               <p className="text-xs text-[var(--fg-subtle)]">Style mode: trains on the trigger word only (no per-image captions) — good for style/aesthetic LoRAs.</p>
+            )}
+            {captionImages && (
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={pruneTags} onChange={(e) => setPruneTags(e.target.checked)} className="accent-[var(--accent)]" />
+                Strip junk tags <span className="text-[10px] text-[var(--fg-subtle)]">(watermark, artist, quality cruft)</span>
+              </label>
             )}
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" checked={tte} onChange={(e) => setTte(e.target.checked)} className="accent-[var(--accent)]" />

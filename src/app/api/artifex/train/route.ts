@@ -18,6 +18,8 @@ export async function POST(req: NextRequest) {
     ...(Array.isArray(b.captions) ? { captions: b.captions } : {}),
     ...(b.trigger ? { trigger: b.trigger } : {}),
     auto_caption: b.autoCaption !== false,
+    prune_tags: b.pruneTags !== false,
+    ...(b.sampling ? { sampling: b.sampling } : {}),
     steps: b.steps ?? 800,
     rank: b.rank ?? 16,
     alpha: b.alpha ?? 8,
