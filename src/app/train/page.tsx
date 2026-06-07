@@ -46,6 +46,18 @@ export default function TrainPage() {
     }).catch(() => {});
   }, []);
 
+  // Images handed over from the Gallery ("Send to Train").
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("artifex:train-images");
+      if (raw) {
+        const urls: string[] = JSON.parse(raw);
+        setImgs((p) => [...p, ...urls.map((u) => ({ id: uid(), dataUrl: u, caption: "" }))]);
+        sessionStorage.removeItem("artifex:train-images");
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // Poll the training job until it finishes.
   useEffect(() => {
     if (!job || job.state === "completed" || job.state === "failed") return;

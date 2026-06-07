@@ -63,6 +63,12 @@ export default function DetailerPage() {
     return () => document.removeEventListener("paste", onPaste);
   }, []);
 
+  // Source handed over from the Gallery ("Send to Detailer").
+  useEffect(() => {
+    const s = sessionStorage.getItem("artifex:detailer-src");
+    if (s) { setSrc(s); setResult(null); sessionStorage.removeItem("artifex:detailer-src"); }
+  }, []);
+
   const run = useCallback(async () => {
     if (!src) return toast.error("Add a source image");
     if (stack.length === 0) return toast.error("Add at least one detector");

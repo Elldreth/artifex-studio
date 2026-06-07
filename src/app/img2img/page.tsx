@@ -77,6 +77,12 @@ export default function Img2ImgPage() {
     return () => document.removeEventListener("paste", onPaste);
   }, []);
 
+  // Source handed over from the Gallery ("Send to img2img").
+  useEffect(() => {
+    const s = sessionStorage.getItem("artifex:img2img-src");
+    if (s) { setSrc(s); setImage(null); sessionStorage.removeItem("artifex:img2img-src"); }
+  }, []);
+
   const generate = useCallback(async () => {
     if (!model) return toast.error("Pick a model");
     if (!src) return toast.error("Add a source image");
