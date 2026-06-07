@@ -26,6 +26,8 @@ export default function TrainPage() {
   const [steps, setSteps] = useState(800);
   const [rank, setRank] = useState(16);
   const [alpha, setAlpha] = useState(8);
+  const [lr, setLr] = useState(0.0001);
+  const [captionImages, setCaptionImages] = useState(true);
   const [size, setSize] = useState(SIZES[0]);
   const [tte, setTte] = useState(false);
   const [captioning, setCaptioning] = useState(false);
@@ -86,14 +88,14 @@ export default function TrainPage() {
         body: JSON.stringify({
           name: name.trim(), model, trigger: trigger.trim() || undefined,
           images: imgs.map((i) => i.dataUrl), captions: imgs.map((i) => i.caption),
-          steps, rank, alpha, width: size.w, height: size.h, train_text_encoder: tte,
+          autoCaption: captionImages, steps, rank, alpha, lr, width: size.w, height: size.h, train_text_encoder: tte,
         }),
       });
       const j = await r.json();
       if (!r.ok) throw new Error(j.error ?? "could not start training");
       setJob(j); toast.success("Training started");
     } catch (e) { toast.error((e as Error).message); }
-  }, [name, model, trigger, imgs, steps, rank, alpha, size, tte]);
+  }, [name, model, trigger, imgs, captionImages, steps, rank, alpha, lr, size, tte]);
 
   const running = job && job.state !== "completed" && job.state !== "failed";
   const pct = job?.total ? Math.round(((job.step ?? 0) / job.total) * 100) : 0;
@@ -112,10 +114,12 @@ export default function TrainPage() {
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs text-[var(--fg-muted)]">Training images ({imgs.length})</label>
             <div className="flex gap-2">
-              <button onClick={autoCaption} disabled={captioning || imgs.length === 0}
-                className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] flex items-center gap-1 disabled:opacity-50">
-                {captioning ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Auto-caption
-              </button>
+              {captionImages && (
+                <button onClick={autoCaption} disabled={captioning || imgs.length === 0}
+                  className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] flex items-center gap-1 disabled:opacity-50">
+                  {captioning ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Auto-caption
+                </button>
+              )}
               <button onClick={() => fileRef.current?.click()} className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] flex items-center gap-1"><Upload size={13} /> Add</button>
             </div>
           </div>
@@ -147,14 +151,25 @@ export default function TrainPage() {
           <Field label="Trigger word (prepended to every caption)"><input className={inp} value={trigger} onChange={(e) => setTrigger(e.target.value)} placeholder="e.g. mychar" /></Field>
           <Field label="Base model"><select className={inp} value={model} onChange={(e) => setModel(e.target.value)}>{models.map((m) => <option key={m} value={m}>{m}</option>)}</select></Field>
           <Field label="Training size"><select className={inp} value={size.label} onChange={(e) => setSize(SIZES.find((s) => s.label === e.target.value) ?? SIZES[0])}>{SIZES.map((s) => <option key={s.label} value={s.label}>{s.label}</option>)}</select></Field>
-          <div className="grid grid-cols-3 gap-2">
-            <Field label={`Steps`}><input type="number" className={inp} value={steps} onChange={(e) => setSteps(Number(e.target.value))} /></Field>
-            <Field label={`Rank`}><input type="number" className={inp} value={rank} onChange={(e) => setRank(Number(e.target.value))} /></Field>
-            <Field label={`Alpha`}><input type="number" className={inp} value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} /></Field>
+          <div className="grid grid-cols-2 gap-2">
+            <Field label="Steps"><input type="number" className={inp} value={steps} onChange={(e) => setSteps(Number(e.target.value))} /></Field>
+            <Field label="Learning rate"><input type="number" step={0.00001} className={inp} value={lr} onChange={(e) => setLr(Number(e.target.value))} /></Field>
+            <Field label="Rank"><input type="number" className={inp} value={rank} onChange={(e) => setRank(Number(e.target.value))} /></Field>
+            <Field label="Alpha"><input type="number" className={inp} value={alpha} onChange={(e) => setAlpha(Number(e.target.value))} /></Field>
           </div>
-          <label className="flex items-center gap-2 text-sm text-[var(--fg-muted)]">
-            <input type="checkbox" checked={tte} onChange={(e) => setTte(e.target.checked)} className="accent-[var(--accent)]" /> Train text encoder (slower, stronger)
-          </label>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-2.5 space-y-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={captionImages} onChange={(e) => setCaptionImages(e.target.checked)} className="accent-[var(--accent)]" />
+              Caption images (WD14)
+            </label>
+            {!captionImages && (
+              <p className="text-xs text-[var(--fg-subtle)]">Style mode: trains on the trigger word only (no per-image captions) — good for style/aesthetic LoRAs.</p>
+            )}
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={tte} onChange={(e) => setTte(e.target.checked)} className="accent-[var(--accent)]" />
+              Train text encoder (slower, stronger)
+            </label>
+          </div>
 
           {job ? (
             <div className="rounded-xl border border-[var(--border)] bg-[var(--surface)] p-3">

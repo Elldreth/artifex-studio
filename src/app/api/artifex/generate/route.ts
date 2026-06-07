@@ -20,6 +20,10 @@ const Body = z.object({
   height: z.number().int().min(256).max(2048),
   seed: z.number().int().optional(),
   loras: z.array(z.object({ name: z.string(), weight: z.number() })).optional(),
+  hires: z.number().min(1).max(2.5).optional(),
+  hiresDenoise: z.number().min(0).max(1).optional(),
+  hiresSteps: z.number().int().min(1).max(80).optional(),
+  upscaler: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -34,6 +38,14 @@ export async function POST(req: NextRequest) {
     size: `${b.width}x${b.height}`,
     ...(b.negative && b.negative.trim() ? { negative_prompt: b.negative.trim() } : {}),
     ...(b.loras && b.loras.length ? { loras: b.loras } : {}),
+    ...(b.hires && b.hires > 1
+      ? {
+          hires: b.hires,
+          ...(b.hiresDenoise != null ? { hires_denoise: b.hiresDenoise } : {}),
+          ...(b.hiresSteps ? { hires_steps: b.hiresSteps } : {}),
+          ...(b.upscaler ? { upscaler: b.upscaler } : {}),
+        }
+      : {}),
   };
 
   try {

@@ -14,6 +14,7 @@ interface Options {
   schedulers?: string[];
   defaultSampler?: { sampler?: string; scheduler?: string };
   styles?: { id: string; label: string }[];
+  upscalers?: string[];
 }
 
 interface Progress {
@@ -47,6 +48,11 @@ export default function GeneratePage() {
   const [seedLocked, setSeedLocked] = useState(false);
   const [allLoras, setAllLoras] = useState<string[]>([]);
   const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]);
+  const [hiresOn, setHiresOn] = useState(false);
+  const [hires, setHires] = useState(1.5);
+  const [hiresDenoise, setHiresDenoise] = useState(0.4);
+  const [hiresSteps, setHiresSteps] = useState(20);
+  const [upscaler, setUpscaler] = useState("");
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -102,6 +108,7 @@ export default function GeneratePage() {
           sampler: sampler || undefined, scheduler: scheduler || undefined,
           steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed,
           loras: loras.length ? loras : undefined,
+          ...(hiresOn ? { hires, hiresDenoise, hiresSteps, upscaler: upscaler || undefined } : {}),
         }),
       });
       const d = await r.json();
@@ -109,7 +116,7 @@ export default function GeneratePage() {
       setImage(d.image);
       saveItem({
         id: uid(), dataUrl: d.image, prompt, negative, model,
-        settings: { style, sampler, scheduler, steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed, loras: loras.map((l) => `${l.name}:${l.weight}`).join(", ") || undefined },
+        settings: { style, sampler, scheduler, steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed, loras: loras.map((l) => `${l.name}:${l.weight}`).join(", ") || undefined, ...(hiresOn ? { hires: `${hires}x` } : {}) },
         ts: Date.now(),
       }).catch((e) => console.error("history save failed", e));
       toast.success("Generated");
@@ -118,7 +125,7 @@ export default function GeneratePage() {
     } finally {
       setBusy(false); setProg(null);
     }
-  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras]);
+  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras, hiresOn, hires, hiresDenoise, hiresSteps, upscaler]);
 
   const queued = (prog?.inflight ?? 0) > 1;
 
@@ -192,6 +199,33 @@ export default function GeneratePage() {
               </button>
             </div>
           </Field>
+
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" checked={hiresOn} onChange={(e) => setHiresOn(e.target.checked)} className="accent-[var(--accent)]" />
+              <span className="font-medium">Hi-res fix</span>
+              <span className="text-xs text-[var(--fg-subtle)] ml-auto">upscale + refine</span>
+            </label>
+            {hiresOn && (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <Field label={`Scale · ${hires}×`}>
+                  <input type="range" min={1.25} max={2} step={0.05} value={hires} onChange={(e) => setHires(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+                </Field>
+                <Field label={`Denoise · ${hiresDenoise}`}>
+                  <input type="range" min={0.2} max={0.7} step={0.05} value={hiresDenoise} onChange={(e) => setHiresDenoise(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+                </Field>
+                <Field label={`Steps · ${hiresSteps}`}>
+                  <input type="range" min={10} max={40} value={hiresSteps} onChange={(e) => setHiresSteps(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+                </Field>
+                <Field label="Upscaler">
+                  <select className={inp} value={upscaler} onChange={(e) => setUpscaler(e.target.value)}>
+                    <option value="">Latent</option>
+                    {(opt?.upscalers ?? []).map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </Field>
+              </div>
+            )}
+          </div>
 
           {allLoras.length > 0 && (
             <Field label="LoRAs">
