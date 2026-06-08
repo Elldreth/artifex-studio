@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { GraduationCap, Upload, X, Sparkles, Loader2, AlertTriangle, ArrowDownWideNarrow } from "lucide-react";
+import { GraduationCap, Upload, X, Sparkles, Loader2, AlertTriangle, ArrowDownWideNarrow, ScanSearch, Copy, Droplet, FileWarning, UserX } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { uid } from "@/lib/uid";
 import { usePersistentState } from "@/lib/usePersistentState";
 
 interface TrainImg { id: string; dataUrl: string; caption: string }
+interface AnalysisItem { index: number; outlier?: boolean; dup_group?: number | null; blurry?: boolean; caption_mismatch?: boolean; face_coverage?: number | null; coherence?: number }
 
 // Meta/quality cruft to strip from auto-captions (mirrors the engine's set).
 const META_TAGS = new Set(["highres", "absurdres", "lowres", "hires", "commentary", "commentary request", "english commentary", "artist name", "artist request", "signature", "watermark", "username", "web address", "dated", "logo", "character request", "copyright request", "copyright name", "bad id", "bad pixiv id", "md5 mismatch", "jpeg artifacts", "translated", "translation request", "reference sheet", "multiple views"]);
@@ -43,6 +44,8 @@ export default function TrainPage() {
   const [pruneTags, setPruneTags] = usePersistentState("artifex:train:pruneTags", true);
   const [sampling, setSampling] = usePersistentState("artifex:train:sampling", "balance");
   const [sortOutliers, setSortOutliers] = useState(false);
+  const [analysis, setAnalysis] = useState<Record<string, AnalysisItem>>({});
+  const [analyzing, setAnalyzing] = useState(false);
   const [size, setSize] = usePersistentState("artifex:train:size", SIZES[0]);
   const [tte, setTte] = usePersistentState("artifex:train:tte", false);
   const [captioning, setCaptioning] = useState(false);
@@ -107,9 +110,27 @@ export default function TrainPage() {
     return { score, isOutlier: (id: string) => captioned > 2 && (score.get(id) ?? 1) < 0.55 * mean, active: captioned > 2 };
   }, [imgs]);
 
+  // Per-image issue flags: CLIP analysis (if run) wins; else the cheap tag-cohesion.
+  const flagsFor = useCallback((id: string) => {
+    const a = analysis[id];
+    const f: { key: string; label: string; icon: React.ComponentType<{ size?: number }> }[] = [];
+    if (a) {
+      if (a.outlier) f.push({ key: "outlier", label: "Visual outlier", icon: AlertTriangle });
+      if (a.dup_group != null) f.push({ key: "dup", label: `Duplicate (group ${a.dup_group + 1})`, icon: Copy });
+      if (a.blurry) f.push({ key: "blur", label: "Blurry / low detail", icon: Droplet });
+      if (a.caption_mismatch) f.push({ key: "caption", label: "Caption doesn't match image", icon: FileWarning });
+      if (a.face_coverage != null && a.face_coverage > 0 && a.face_coverage < 0.02) f.push({ key: "face", label: "Tiny/no face", icon: UserX });
+    } else if (cohesion.isOutlier(id)) {
+      f.push({ key: "tagout", label: "Tag outlier", icon: AlertTriangle });
+    }
+    return f;
+  }, [analysis, cohesion]);
+
   const ordered = useMemo(
-    () => (sortOutliers ? [...imgs].sort((a, b) => (cohesion.score.get(a.id) ?? 1) - (cohesion.score.get(b.id) ?? 1)) : imgs),
-    [imgs, sortOutliers, cohesion],
+    () => (sortOutliers
+      ? [...imgs].sort((a, b) => (flagsFor(b.id).length - flagsFor(a.id).length) || ((cohesion.score.get(a.id) ?? 1) - (cohesion.score.get(b.id) ?? 1)))
+      : imgs),
+    [imgs, sortOutliers, cohesion, flagsFor],
   );
 
   const addFiles = (files: FileList | File[]) => {
@@ -140,6 +161,24 @@ export default function TrainPage() {
     } finally { setCaptioning(false); }
   }, [imgs, pruneTags]);
 
+  const analyze = useCallback(async () => {
+    if (imgs.length < 2) return toast.error("Add a few images first");
+    setAnalyzing(true);
+    try {
+      const r = await fetch("/api/artifex/dataset/analyze", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: imgs.map((i) => i.dataUrl), captions: imgs.map((i) => i.caption) }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "analysis failed");
+      const map: Record<string, AnalysisItem> = {};
+      (d.items ?? []).forEach((it: AnalysisItem) => { const im = imgs[it.index]; if (im) map[im.id] = it; });
+      setAnalysis(map);
+      const s = d.summary ?? {};
+      toast.success(`Analyzed · ${s.outliers || 0} outliers · ${s.duplicate_groups || 0} dup groups · ${s.blurry || 0} blurry · ${s.caption_mismatches || 0} caption issues`);
+    } catch (e) { toast.error((e as Error).message); } finally { setAnalyzing(false); }
+  }, [imgs]);
+
   const start = useCallback(async () => {
     if (!name.trim()) return toast.error("Name your LoRA");
     if (imgs.length < 4) return toast.error("Add at least ~4 training images");
@@ -160,7 +199,8 @@ export default function TrainPage() {
 
   const running = job && job.state !== "completed" && job.state !== "failed";
   const pct = job?.total ? Math.round(((job.step ?? 0) / job.total) * 100) : 0;
-  const outlierCount = imgs.filter((im) => cohesion.isOutlier(im.id)).length;
+  const flaggedCount = imgs.filter((im) => flagsFor(im.id).length > 0).length;
+  const analyzed = Object.keys(analysis).length > 0;
 
   return (
     <div className="animate-fade-in">
@@ -176,13 +216,17 @@ export default function TrainPage() {
           <div className="flex items-center justify-between mb-2">
             <label className="text-xs text-[var(--fg-muted)]">
               Training images ({imgs.length})
-              {cohesion.active && outlierCount > 0 && <span className="text-[var(--warn)]"> · {outlierCount} outlier{outlierCount > 1 ? "s" : ""}</span>}
+              {flaggedCount > 0 && <span className="text-[var(--warn)]"> · {flaggedCount} flagged</span>}
             </label>
             <div className="flex gap-2">
-              {cohesion.active && outlierCount > 0 && (
-                <button onClick={() => setSortOutliers((v) => !v)} title="Sort least-cohesive (likely outliers) to the top to review/remove"
+              <button onClick={analyze} disabled={analyzing || imgs.length < 2} title="CLIP analysis: outliers, duplicates, blur, caption mismatch, face coverage"
+                className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)] flex items-center gap-1 disabled:opacity-50">
+                {analyzing ? <Loader2 size={13} className="animate-spin" /> : <ScanSearch size={13} />} Analyze
+              </button>
+              {flaggedCount > 0 && (
+                <button onClick={() => setSortOutliers((v) => !v)} title="Sort flagged images (likely problems) to the top to review/remove"
                   className={`text-xs px-2.5 py-1 rounded-lg border flex items-center gap-1 ${sortOutliers ? "border-[var(--accent)] text-[var(--accent)]" : "border-[var(--border)] hover:border-[var(--accent)]"}`}>
-                  <ArrowDownWideNarrow size={13} /> Outliers
+                  <ArrowDownWideNarrow size={13} /> Flagged
                 </button>
               )}
               {captionImages && (
@@ -204,13 +248,17 @@ export default function TrainPage() {
           ) : (
             <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
               {ordered.map((im) => {
-                const out = cohesion.isOutlier(im.id);
+                const flags = flagsFor(im.id);
                 return (
-                  <div key={im.id} className={`flex gap-2 items-start rounded-lg border bg-[var(--bg-elevated)] p-2 ${out ? "border-[var(--warn)]" : "border-[var(--border)]"}`}>
+                  <div key={im.id} className={`flex gap-2 items-start rounded-lg border bg-[var(--bg-elevated)] p-2 ${flags.length ? "border-[var(--warn)]" : "border-[var(--border)]"}`}>
                     <div className="relative shrink-0">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={im.dataUrl} alt="" className="w-16 h-16 object-cover rounded" />
-                      {out && <span className="absolute -top-1 -left-1 bg-[var(--warn)] text-black rounded-full p-0.5" title="Tag outlier — review or remove"><AlertTriangle size={11} /></span>}
+                      {flags.length > 0 && (
+                        <div className="absolute -top-1 -left-1 flex flex-col gap-0.5">
+                          {flags.map((f) => { const I = f.icon; return <span key={f.key} title={f.label} className="bg-[var(--warn)] text-black rounded-full p-0.5"><I size={11} /></span>; })}
+                        </div>
+                      )}
                     </div>
                     <textarea className={`${inp} min-h-[64px] text-xs resize-y`} placeholder="caption (blank → auto WD14 at train time)" value={im.caption}
                       onChange={(e) => setImgs((p) => p.map((x) => (x.id === im.id ? { ...x, caption: e.target.value } : x)))} />
