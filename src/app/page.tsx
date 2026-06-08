@@ -6,6 +6,7 @@ import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon, Layers } from "luc
 import { PageHeader } from "@/components/PageHeader";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 interface Options {
   reachable: boolean;
@@ -35,24 +36,24 @@ const inp = "w-full rounded-lg bg-[var(--bg-elevated)] border border-[var(--bord
 
 export default function GeneratePage() {
   const [opt, setOpt] = useState<Options | null>(null);
-  const [model, setModel] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [negative, setNegative] = useState(DEFAULT_NEG);
-  const [style, setStyle] = useState("");
-  const [sampler, setSampler] = useState("");
-  const [scheduler, setScheduler] = useState("");
-  const [steps, setSteps] = useState(30);
-  const [cfg, setCfg] = useState(6);
-  const [aspect, setAspect] = useState(ASPECTS[0]);
-  const [seed, setSeed] = useState("");
-  const [seedLocked, setSeedLocked] = useState(false);
+  const [model, setModel] = usePersistentState("artifex:gen:model", "");
+  const [prompt, setPrompt] = usePersistentState("artifex:gen:prompt", "");
+  const [negative, setNegative] = usePersistentState("artifex:gen:negative", DEFAULT_NEG);
+  const [style, setStyle] = usePersistentState("artifex:gen:style", "");
+  const [sampler, setSampler] = usePersistentState("artifex:gen:sampler", "");
+  const [scheduler, setScheduler] = usePersistentState("artifex:gen:scheduler", "");
+  const [steps, setSteps] = usePersistentState("artifex:gen:steps", 30);
+  const [cfg, setCfg] = usePersistentState("artifex:gen:cfg", 6);
+  const [aspect, setAspect] = usePersistentState("artifex:gen:aspect", ASPECTS[0]);
+  const [seed, setSeed] = usePersistentState("artifex:gen:seed", "");
+  const [seedLocked, setSeedLocked] = usePersistentState("artifex:gen:seedLocked", false);
   const [allLoras, setAllLoras] = useState<string[]>([]);
-  const [loras, setLoras] = useState<{ name: string; weight: number }[]>([]);
-  const [hiresOn, setHiresOn] = useState(false);
-  const [hires, setHires] = useState(1.5);
-  const [hiresDenoise, setHiresDenoise] = useState(0.4);
-  const [hiresSteps, setHiresSteps] = useState(20);
-  const [upscaler, setUpscaler] = useState("");
+  const [loras, setLoras] = usePersistentState<{ name: string; weight: number }[]>("artifex:gen:loras", []);
+  const [hiresOn, setHiresOn] = usePersistentState("artifex:gen:hiresOn", false);
+  const [hires, setHires] = usePersistentState("artifex:gen:hires", 1.5);
+  const [hiresDenoise, setHiresDenoise] = usePersistentState("artifex:gen:hiresDenoise", 0.4);
+  const [hiresSteps, setHiresSteps] = usePersistentState("artifex:gen:hiresSteps", 20);
+  const [upscaler, setUpscaler] = usePersistentState("artifex:gen:upscaler", "");
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -64,9 +65,10 @@ export default function GeneratePage() {
       .then((r) => r.json())
       .then((d: Options) => {
         setOpt(d);
-        if (d.models?.length) setModel(d.models[0]);
-        setSampler(d.defaultSampler?.sampler ?? "");
-        setScheduler(d.defaultSampler?.scheduler ?? "");
+        // Only fill from server defaults when there's no persisted choice.
+        setModel((c) => c || d.models?.[0] || "");
+        setSampler((c) => c || d.defaultSampler?.sampler || "");
+        setScheduler((c) => c || d.defaultSampler?.scheduler || "");
       })
       .catch(() => setOpt({ reachable: false }));
     fetch("/api/artifex/loras", { cache: "no-store" })

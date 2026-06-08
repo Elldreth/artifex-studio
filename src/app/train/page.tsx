@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { GraduationCap, Upload, X, Sparkles, Loader2, AlertTriangle, ArrowDownWideNarrow } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { uid } from "@/lib/uid";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 interface TrainImg { id: string; dataUrl: string; caption: string }
 
@@ -30,27 +31,27 @@ const SIZES = [
 
 export default function TrainPage() {
   const [models, setModels] = useState<string[]>([]);
-  const [model, setModel] = useState("");
+  const [model, setModel] = usePersistentState("artifex:train:model", "");
   const [imgs, setImgs] = useState<TrainImg[]>([]);
-  const [name, setName] = useState("");
-  const [trigger, setTrigger] = useState("");
-  const [steps, setSteps] = useState(800);
-  const [rank, setRank] = useState(16);
-  const [alpha, setAlpha] = useState(8);
-  const [lr, setLr] = useState(0.0001);
-  const [captionImages, setCaptionImages] = useState(true);
-  const [pruneTags, setPruneTags] = useState(true);
-  const [sampling, setSampling] = useState("balance");
+  const [name, setName] = usePersistentState("artifex:train:name", "");
+  const [trigger, setTrigger] = usePersistentState("artifex:train:trigger", "");
+  const [steps, setSteps] = usePersistentState("artifex:train:steps", 800);
+  const [rank, setRank] = usePersistentState("artifex:train:rank", 16);
+  const [alpha, setAlpha] = usePersistentState("artifex:train:alpha", 8);
+  const [lr, setLr] = usePersistentState("artifex:train:lr", 0.0001);
+  const [captionImages, setCaptionImages] = usePersistentState("artifex:train:captionImages", true);
+  const [pruneTags, setPruneTags] = usePersistentState("artifex:train:pruneTags", true);
+  const [sampling, setSampling] = usePersistentState("artifex:train:sampling", "balance");
   const [sortOutliers, setSortOutliers] = useState(false);
-  const [size, setSize] = useState(SIZES[0]);
-  const [tte, setTte] = useState(false);
+  const [size, setSize] = usePersistentState("artifex:train:size", SIZES[0]);
+  const [tte, setTte] = usePersistentState("artifex:train:tte", false);
   const [captioning, setCaptioning] = useState(false);
   const [job, setJob] = useState<Job | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/artifex/models", { cache: "no-store" }).then((r) => r.json()).then((d) => {
-      setModels(d.models ?? []); if (d.models?.length) setModel(d.models[0]);
+      setModels(d.models ?? []); setModel((c) => c || d.models?.[0] || "");
     }).catch(() => {});
   }, []);
 

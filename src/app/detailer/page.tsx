@@ -8,6 +8,7 @@ import { DetailerStack, cleanSlot, type Slot, type Detector } from "@/components
 import { LoraPicker, type LoraSel } from "@/components/LoraPicker";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 interface Reg { reachable: boolean; detailers?: Slot[]; generic?: Slot; detectors?: Detector[] }
 interface Models { models?: string[]; samplers?: string[]; schedulers?: string[]; defaultSampler?: { sampler?: string; scheduler?: string } }
@@ -18,14 +19,14 @@ const inp = "w-full rounded-lg bg-[var(--bg-elevated)] border border-[var(--bord
 export default function DetailerPage() {
   const [reg, setReg] = useState<Reg | null>(null);
   const [opt, setOpt] = useState<Models | null>(null);
-  const [stack, setStack] = useState<Slot[]>([]);
+  const [stack, setStack] = usePersistentState<Slot[]>("artifex:det:stack", []);
   const [src, setSrc] = useState<string | null>(null);
-  const [model, setModel] = useState("");
-  const [basePrompt, setBasePrompt] = useState("");
-  const [sampler, setSampler] = useState("");
-  const [scheduler, setScheduler] = useState("");
+  const [model, setModel] = usePersistentState("artifex:det:model", "");
+  const [basePrompt, setBasePrompt] = usePersistentState("artifex:det:basePrompt", "");
+  const [sampler, setSampler] = usePersistentState("artifex:det:sampler", "");
+  const [scheduler, setScheduler] = usePersistentState("artifex:det:scheduler", "");
   const [allLoras, setAllLoras] = useState<string[]>([]);
-  const [loras, setLoras] = useState<LoraSel[]>([]);
+  const [loras, setLoras] = usePersistentState<LoraSel[]>("artifex:det:loras", []);
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -35,13 +36,14 @@ export default function DetailerPage() {
   useEffect(() => {
     fetch("/api/artifex/detailers", { cache: "no-store" }).then((r) => r.json()).then((d: Reg) => {
       setReg(d);
-      setStack((d.detailers ?? []).map(cleanSlot)); // seed with the tuned default pipeline
+      // Seed the default pipeline only if the user has no persisted stack yet.
+      setStack((c) => (c.length ? c : (d.detailers ?? []).map(cleanSlot)));
     }).catch(() => setReg({ reachable: false }));
     fetch("/api/artifex/models", { cache: "no-store" }).then((r) => r.json()).then((d: Models) => {
       setOpt(d);
-      if (d.models?.length) setModel(d.models[0]);
-      setSampler(d.defaultSampler?.sampler ?? "");
-      setScheduler(d.defaultSampler?.scheduler ?? "");
+      setModel((c) => c || d.models?.[0] || "");
+      setSampler((c) => c || d.defaultSampler?.sampler || "");
+      setScheduler((c) => c || d.defaultSampler?.scheduler || "");
     }).catch(() => {});
     fetch("/api/artifex/loras", { cache: "no-store" }).then((r) => r.json())
       .then((d) => setAllLoras((d.loras ?? []).map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string; file?: string }).name ?? (l as { file?: string }).file ?? "")).filter(Boolean)))

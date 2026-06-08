@@ -6,6 +6,7 @@ import { Images as ImagesIcon, Shuffle, Lock, LockOpen, Download, Upload, X } fr
 import { PageHeader } from "@/components/PageHeader";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
+import { usePersistentState } from "@/lib/usePersistentState";
 
 interface Options {
   reachable: boolean;
@@ -22,18 +23,18 @@ const inp = "w-full rounded-lg bg-[var(--bg-elevated)] border border-[var(--bord
 
 export default function Img2ImgPage() {
   const [opt, setOpt] = useState<Options | null>(null);
-  const [model, setModel] = useState("");
+  const [model, setModel] = usePersistentState("artifex:i2i:model", "");
   const [src, setSrc] = useState<string | null>(null);
-  const [strength, setStrength] = useState(0.5);
-  const [prompt, setPrompt] = useState("");
-  const [negative, setNegative] = useState(DEFAULT_NEG);
-  const [style, setStyle] = useState("");
-  const [sampler, setSampler] = useState("");
-  const [scheduler, setScheduler] = useState("");
-  const [steps, setSteps] = useState(30);
-  const [cfg, setCfg] = useState(6);
-  const [seed, setSeed] = useState("");
-  const [seedLocked, setSeedLocked] = useState(false);
+  const [strength, setStrength] = usePersistentState("artifex:i2i:strength", 0.5);
+  const [prompt, setPrompt] = usePersistentState("artifex:i2i:prompt", "");
+  const [negative, setNegative] = usePersistentState("artifex:i2i:negative", DEFAULT_NEG);
+  const [style, setStyle] = usePersistentState("artifex:i2i:style", "");
+  const [sampler, setSampler] = usePersistentState("artifex:i2i:sampler", "");
+  const [scheduler, setScheduler] = usePersistentState("artifex:i2i:scheduler", "");
+  const [steps, setSteps] = usePersistentState("artifex:i2i:steps", 30);
+  const [cfg, setCfg] = usePersistentState("artifex:i2i:cfg", 6);
+  const [seed, setSeed] = usePersistentState("artifex:i2i:seed", "");
+  const [seedLocked, setSeedLocked] = usePersistentState("artifex:i2i:seedLocked", false);
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -45,9 +46,9 @@ export default function Img2ImgPage() {
       .then((r) => r.json())
       .then((d: Options) => {
         setOpt(d);
-        if (d.models?.length) setModel(d.models[0]);
-        setSampler(d.defaultSampler?.sampler ?? "");
-        setScheduler(d.defaultSampler?.scheduler ?? "");
+        setModel((c) => c || d.models?.[0] || "");
+        setSampler((c) => c || d.defaultSampler?.sampler || "");
+        setScheduler((c) => c || d.defaultSampler?.scheduler || "");
       })
       .catch(() => setOpt({ reachable: false }));
   }, []);
