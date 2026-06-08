@@ -6,6 +6,7 @@ import { GraduationCap, Upload, X, Sparkles, Loader2, AlertTriangle, ArrowDownWi
 import { PageHeader } from "@/components/PageHeader";
 import { uid } from "@/lib/uid";
 import { usePersistentState } from "@/lib/usePersistentState";
+import { downscaleDataUrl, downscaleAll } from "@/lib/image";
 
 interface TrainImg { id: string; dataUrl: string; caption: string }
 interface AnalysisItem { index: number; outlier?: boolean; dup_group?: number | null; blurry?: boolean; caption_mismatch?: boolean; face_coverage?: number | null; coherence?: number }
@@ -150,7 +151,8 @@ export default function TrainPage() {
       for (const im of imgs) {
         if (im.caption.trim()) continue;
         try {
-          const r = await fetch("/api/artifex/tag", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: im.dataUrl }) });
+          const small = await downscaleDataUrl(im.dataUrl, 768, 0.9);
+          const r = await fetch("/api/artifex/tag", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: small }) });
           const d = await r.json();
           if (r.ok) {
             let tags: string[] = d.all ?? d.general ?? [];
@@ -168,9 +170,10 @@ export default function TrainPage() {
     if (imgs.length < 2) return toast.error("Add a few images first");
     setAnalyzing(true);
     try {
+      const images = await downscaleAll(imgs.map((i) => i.dataUrl), 768, 0.9);
       const r = await fetch("/api/artifex/dataset/analyze", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images: imgs.map((i) => i.dataUrl), captions: imgs.map((i) => i.caption) }),
+        body: JSON.stringify({ images, captions: imgs.map((i) => i.caption) }),
       });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "analysis failed");
@@ -186,11 +189,12 @@ export default function TrainPage() {
     if (!name.trim()) return toast.error("Name your LoRA");
     if (imgs.length < 4) return toast.error("Add at least ~4 training images");
     try {
+      const images = await downscaleAll(imgs.map((i) => i.dataUrl), 1216, 0.95);
       const r = await fetch("/api/artifex/train", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(), model, trigger: trigger.trim() || undefined,
-          images: imgs.map((i) => i.dataUrl), captions: imgs.map((i) => i.caption),
+          images, captions: imgs.map((i) => i.caption),
           autoCaption: captionImages, pruneTags, sampling, steps, rank, alpha, lr, width: size.w, height: size.h, train_text_encoder: tte,
         }),
       });
