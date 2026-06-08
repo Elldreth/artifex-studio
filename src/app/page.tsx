@@ -123,11 +123,14 @@ export default function GeneratePage() {
       }).catch((e) => console.error("history save failed", e));
       toast.success("Generated");
     } catch (e) {
-      toast.error((e as Error).message);
+      const m = (e as Error).message;
+      if (/cancel/i.test(m)) toast("Cancelled"); else toast.error(m);
     } finally {
       setBusy(false); setProg(null);
     }
   }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras, hiresOn, hires, hiresDenoise, hiresSteps, upscaler]);
+
+  const cancel = () => fetch("/api/artifex/cancel", { method: "POST" }).catch(() => {});
 
   const queued = (prog?.inflight ?? 0) > 1;
 
@@ -273,6 +276,7 @@ export default function GeneratePage() {
               <div className="text-xs text-[var(--fg-subtle)] mt-1.5">
                 {prog?.percent != null ? `${prog.percent}%` : ""}{prog?.eta_s != null ? ` · ~${Math.round(prog.eta_s)}s left` : ""}
               </div>
+              <button onClick={cancel} className="mt-4 text-xs px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--fg-muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]">Cancel</button>
             </div>
           ) : image ? (
             <div className="w-full">

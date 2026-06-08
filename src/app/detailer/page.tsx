@@ -86,9 +86,11 @@ export default function DetailerPage() {
       const applied = (d.applied ?? []).map((a: { region: string; regions: number }) => `${a.region}:${a.regions}`).join(" ");
       saveItem({ id: uid(), dataUrl: d.image, prompt: basePrompt || "(detailer)", model: model || "—", settings: { mode: "detail", regions: applied }, ts: Date.now() }).catch((e) => console.error(e));
       toast.success(`Detailed${applied ? ` · ${applied}` : ""}`);
-    } catch (e) { toast.error((e as Error).message); }
+    } catch (e) { const m = (e as Error).message; if (/cancel/i.test(m)) toast("Cancelled"); else toast.error(m); }
     finally { setBusy(false); setProg(null); }
   }, [src, stack, model, basePrompt, sampler, scheduler, loras]);
+
+  const cancel = () => fetch("/api/artifex/cancel", { method: "POST" }).catch(() => {});
 
   const queued = (prog?.inflight ?? 0) > 1;
 
@@ -128,6 +130,7 @@ export default function DetailerPage() {
               <div className="text-sm text-[var(--fg-muted)] mb-2">{queued ? `Queued · ${(prog!.inflight! - 1)} ahead` : (prog?.stage ?? "Starting…")}{prog?.steps ? ` · ${prog.step}/${prog.steps}` : ""}</div>
               <div className="h-2 rounded-full bg-[var(--bg-elevated)] overflow-hidden"><div className="h-full bg-[var(--accent)] transition-[width] duration-300" style={{ width: `${prog?.percent ?? 0}%` }} /></div>
               <div className="text-xs text-[var(--fg-subtle)] mt-1.5">{prog?.percent != null ? `${prog.percent}%` : ""}{prog?.eta_s != null ? ` · ~${Math.round(prog.eta_s)}s left` : ""}</div>
+              <button onClick={cancel} className="mt-3 text-xs px-3 py-1.5 rounded-lg border border-[var(--border)] text-[var(--fg-muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]">Cancel</button>
             </div>
           )}
           {result && (

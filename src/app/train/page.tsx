@@ -72,7 +72,7 @@ export default function TrainPage() {
 
   // Poll the training job until it finishes.
   useEffect(() => {
-    if (!job || job.state === "completed" || job.state === "failed") return;
+    if (!job || ["completed", "failed", "cancelled"].includes(job.state)) return;
     let alive = true;
     const id = setInterval(async () => {
       try {
@@ -81,10 +81,13 @@ export default function TrainPage() {
         setJob(j);
         if (j.state === "completed") toast.success(`LoRA "${j.lora}" trained`);
         if (j.state === "failed") toast.error(j.error ?? "training failed");
+        if (j.state === "cancelled") toast("Training cancelled");
       } catch { /* keep polling */ }
     }, 2000);
     return () => { alive = false; clearInterval(id); };
   }, [job]);
+
+  const cancelTrain = () => job && fetch(`/api/artifex/train/${job.job_id}/cancel`, { method: "POST" }).catch(() => {});
 
   // Tag-cohesion per image (for outlier review): how mainstream each image's
   // tags are vs the whole set. Low = outlier — review/remove. Only meaningful
@@ -321,7 +324,11 @@ export default function TrainPage() {
               {job.loss != null && <div className="text-xs text-[var(--fg-subtle)]">loss {job.loss.toFixed(4)}</div>}
               {job.state === "completed" && <div className="text-sm text-[var(--success)]">✓ Saved “{job.lora}” — find it in LoRAs.</div>}
               {job.state === "failed" && <div className="text-sm text-[var(--danger)] break-words">{job.error}</div>}
-              {(job.state === "completed" || job.state === "failed") && (
+              {job.state === "cancelled" && <div className="text-sm text-[var(--fg-muted)]">Cancelled — no LoRA saved.</div>}
+              {running && (
+                <button onClick={cancelTrain} className="mt-2 text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] text-[var(--fg-muted)] hover:text-[var(--danger)] hover:border-[var(--danger)]">Cancel training</button>
+              )}
+              {["completed", "failed", "cancelled"].includes(job.state) && (
                 <button onClick={() => setJob(null)} className="mt-2 text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] hover:border-[var(--accent)]">Train another</button>
               )}
             </div>
