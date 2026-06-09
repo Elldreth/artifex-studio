@@ -39,6 +39,14 @@ describe("POST /api/artifex/generate", () => {
     expect(sent.identity_scale).toBe(0.6);
   });
 
+  it("forwards a ControlNet spec", async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: "AAA" }] }), { status: 200 }));
+    await POST(req({ model: "m", prompt: "cat", width: 1024, height: 1024, controlnet: [{ model: "canny-xl", image: "data:image/png;base64,zzzz", scale: 0.7, preprocess: "canny" }] }));
+    const sent = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(sent.controlnet[0].model).toBe("canny-xl");
+    expect(sent.controlnet[0].scale).toBe(0.7);
+  });
+
   it("surfaces an engine error as 502", async () => {
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 }));
     const r = await POST(req({ model: "m", prompt: "cat", width: 1024, height: 1024 }));

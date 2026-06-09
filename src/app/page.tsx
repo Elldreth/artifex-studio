@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon, Layers, UserSquare, Upload, X } from "lucide-react";
+import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon, Layers, UserSquare, Upload, X, Network } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
@@ -61,7 +61,17 @@ export default function GeneratePage() {
   const [identityScale, setIdentityScale] = usePersistentState("artifex:gen:idScale", 0.5);
   const [batch, setBatch] = usePersistentState("artifex:gen:batch", 1);
   const [presets, setPresets] = usePersistentState<Record<string, Record<string, unknown>>>("artifex:gen:presets", {});
+  const [cnModels, setCnModels] = useState<{ name: string }[]>([]);
+  const [cnPreprocessors, setCnPreprocessors] = useState<string[]>([]);
+  const [cnModel, setCnModel] = usePersistentState("artifex:gen:cnModel", "");
+  const [cnImage, setCnImage] = useState<string | null>(null);
+  const [cnPreprocess, setCnPreprocess] = usePersistentState("artifex:gen:cnPre", "canny");
+  const [cnScale, setCnScale] = usePersistentState("artifex:gen:cnScale", 0.8);
+  const [cnLow, setCnLow] = usePersistentState("artifex:gen:cnLow", 100);
+  const [cnHigh, setCnHigh] = usePersistentState("artifex:gen:cnHigh", 200);
+  const [cnMap, setCnMap] = useState<string | null>(null);
   const refFileRef = useRef<HTMLInputElement>(null);
+  const cnFileRef = useRef<HTMLInputElement>(null);
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
@@ -85,6 +95,10 @@ export default function GeneratePage() {
     fetch("/api/artifex/loras", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setAllLoras((d.loras ?? []).map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string; file?: string }).name ?? (l as { file?: string }).file ?? "")).filter(Boolean)))
+      .catch(() => {});
+    fetch("/api/artifex/controlnets", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { if (d.reachable) { setCnModels(d.models ?? []); setCnPreprocessors(d.preprocessors ?? []); setCnModel((c) => c || d.models?.[0]?.name || ""); } })
       .catch(() => {});
   }, []);
 
@@ -114,6 +128,7 @@ export default function GeneratePage() {
     setBusy(true); setProg(null); setImage(null); setBatchImages([]);
     // IP-Adapter reference: downscale once (modest res is plenty).
     const ref = refImage ? await downscaleDataUrl(refImage, 768, 0.92) : null;
+    const cnImg = cnModel && cnImage ? await downscaleDataUrl(cnImage, 1024, 0.92) : null;
     const collected: string[] = [];
     try {
       for (let i = 0; i < count; i++) {
@@ -130,6 +145,7 @@ export default function GeneratePage() {
             loras: loras.length ? loras : undefined,
             ...(hiresOn ? { hires, hiresDenoise, hiresSteps, upscaler: upscaler || undefined } : {}),
             ...(ref ? { identityImage: ref, identityMethod: identityMethod || undefined, identityScale } : {}),
+            ...(cnImg ? { controlnet: [{ model: cnModel, image: cnImg, scale: cnScale, preprocess: cnPreprocess, low_threshold: cnLow, high_threshold: cnHigh }] } : {}),
           }),
         });
         const d = await r.json();
@@ -150,11 +166,22 @@ export default function GeneratePage() {
     } finally {
       setBusy(false); setProg(null); setBatchInfo("");
     }
-  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras, hiresOn, hires, hiresDenoise, hiresSteps, upscaler, refImage, identityMethod, identityScale, batch]);
+  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras, hiresOn, hires, hiresDenoise, hiresSteps, upscaler, refImage, identityMethod, identityScale, batch, cnModel, cnImage, cnPreprocess, cnScale, cnLow, cnHigh]);
 
   const cancel = () => fetch("/api/artifex/cancel", { method: "POST" }).catch(() => {});
 
   const loadRef = (f: File) => { const fr = new FileReader(); fr.onload = () => setRefImage(fr.result as string); fr.readAsDataURL(f); };
+  const loadCn = (f: File) => { const fr = new FileReader(); fr.onload = () => { setCnImage(fr.result as string); setCnMap(null); }; fr.readAsDataURL(f); };
+  const previewCn = async () => {
+    if (!cnImage) return;
+    try {
+      const small = await downscaleDataUrl(cnImage, 1024, 0.92);
+      const r = await fetch("/api/artifex/controlnet/preprocess", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: small, preprocess: cnPreprocess, low_threshold: cnLow, high_threshold: cnHigh }) });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? "preprocess failed");
+      setCnMap(d.image);
+    } catch (e) { toast.error((e as Error).message); }
+  };
 
   const applyPreset = (name: string) => {
     const p = presets[name];
@@ -286,6 +313,43 @@ export default function GeneratePage() {
                 </button>
               )}
               <input ref={refFileRef} type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files?.[0]) loadRef(e.target.files[0]); }} />
+            </div>
+          )}
+
+          {cnModels.length > 0 && (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+              <div className="flex items-center gap-2 text-sm font-medium mb-1">
+                <Network size={15} className="text-[var(--accent)]" /> ControlNet
+                <span className="text-xs text-[var(--fg-subtle)] font-normal ml-auto">structure guidance</span>
+              </div>
+              {cnImage ? (
+                <div className="space-y-2 mt-2">
+                  <div className="relative">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={cnMap ?? cnImage} alt="control" className="w-full max-h-44 object-contain rounded border border-[var(--border)] bg-black" />
+                    <button onClick={() => { setCnImage(null); setCnMap(null); }} className="absolute top-1 right-1 p-1 rounded bg-black/60 text-white"><X size={13} /></button>
+                    {cnMap && <span className="absolute bottom-1 left-1 text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white">control map</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <Field label="Model"><select className={inp} value={cnModel} onChange={(e) => setCnModel(e.target.value)}>{cnModels.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}</select></Field>
+                    <Field label="Preprocess"><select className={inp} value={cnPreprocess} onChange={(e) => { setCnPreprocess(e.target.value); setCnMap(null); }}>{cnPreprocessors.map((p) => <option key={p} value={p}>{p}</option>)}</select></Field>
+                  </div>
+                  {cnPreprocess === "canny" && (
+                    <div className="grid grid-cols-2 gap-2">
+                      <Field label={`Canny low · ${cnLow}`}><input type="range" min={0} max={255} value={cnLow} onChange={(e) => { setCnLow(Number(e.target.value)); setCnMap(null); }} className="w-full accent-[var(--accent)]" /></Field>
+                      <Field label={`Canny high · ${cnHigh}`}><input type="range" min={0} max={255} value={cnHigh} onChange={(e) => { setCnHigh(Number(e.target.value)); setCnMap(null); }} className="w-full accent-[var(--accent)]" /></Field>
+                    </div>
+                  )}
+                  <Field label={`Strength · ${cnScale}`}><input type="range" min={0} max={2} step={0.05} value={cnScale} onChange={(e) => setCnScale(Number(e.target.value))} className="w-full accent-[var(--accent)]" /></Field>
+                  <button onClick={previewCn} className="text-xs px-2.5 py-1 rounded-lg border border-[var(--border)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:border-[var(--accent)]">Preview control map</button>
+                </div>
+              ) : (
+                <button onClick={() => cnFileRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) loadCn(f); }}
+                  className="w-full mt-1 rounded-lg border border-dashed border-[var(--border)] py-4 text-xs text-[var(--fg-muted)] hover:border-[var(--accent)] flex flex-col items-center gap-1">
+                  <Upload size={16} /> Drop / click a control image (pose, depth, edges…)
+                </button>
+              )}
+              <input ref={cnFileRef} type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files?.[0]) loadCn(e.target.files[0]); }} />
             </div>
           )}
 

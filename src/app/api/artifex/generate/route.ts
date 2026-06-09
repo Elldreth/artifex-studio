@@ -27,6 +27,14 @@ const Body = z.object({
   identityImage: z.string().min(10).optional(),
   identityMethod: z.string().optional(),
   identityScale: z.number().min(0).max(1.5).optional(),
+  controlnet: z.array(z.object({
+    model: z.string(),
+    image: z.string().min(10),
+    scale: z.number().min(0).max(2).optional(),
+    preprocess: z.string().optional(),
+    low_threshold: z.number().int().optional(),
+    high_threshold: z.number().int().optional(),
+  })).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -48,6 +56,7 @@ export async function POST(req: NextRequest) {
           ...(b.identityScale != null ? { identity_scale: b.identityScale } : {}),
         }
       : {}),
+    ...(b.controlnet && b.controlnet.length ? { controlnet: b.controlnet } : {}),
     ...(b.hires && b.hires > 1
       ? {
           hires: b.hires,
