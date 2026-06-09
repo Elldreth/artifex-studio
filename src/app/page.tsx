@@ -70,6 +70,9 @@ export default function GeneratePage() {
   const [cnLow, setCnLow] = usePersistentState("artifex:gen:cnLow", 100);
   const [cnHigh, setCnHigh] = usePersistentState("artifex:gen:cnHigh", 200);
   const [cnMap, setCnMap] = useState<string | null>(null);
+  const [cnRepo, setCnRepo] = useState("");
+  const [cnDownloading, setCnDownloading] = useState(false);
+  const [cnDownloadMsg, setCnDownloadMsg] = useState("");
   const refFileRef = useRef<HTMLInputElement>(null);
   const cnFileRef = useRef<HTMLInputElement>(null);
 
@@ -96,11 +99,35 @@ export default function GeneratePage() {
       .then((r) => r.json())
       .then((d) => setAllLoras((d.loras ?? []).map((l: unknown) => (typeof l === "string" ? l : (l as { name?: string; file?: string }).name ?? (l as { file?: string }).file ?? "")).filter(Boolean)))
       .catch(() => {});
+    refreshCn();
+  }, []);
+
+  const refreshCn = (select?: string) =>
     fetch("/api/artifex/controlnets", { cache: "no-store" })
       .then((r) => r.json())
-      .then((d) => { if (d.reachable) { setCnModels(d.models ?? []); setCnPreprocessors(d.preprocessors ?? []); setCnModel((c) => c || d.models?.[0]?.name || ""); } })
+      .then((d) => { if (d.reachable) { setCnModels(d.models ?? []); setCnPreprocessors(d.preprocessors ?? []); setCnModel((c) => select || c || d.models?.[0]?.name || ""); } })
       .catch(() => {});
-  }, []);
+
+  const downloadCn = async () => {
+    const repo = cnRepo.trim();
+    if (!repo) return;
+    setCnDownloading(true); setCnDownloadMsg("");
+    try {
+      const r = await fetch("/api/artifex/controlnet/download", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error ?? "download failed");
+      setCnDownloadMsg(`Installed ${j.name}`);
+      setCnRepo("");
+      await refreshCn(j.name);
+    } catch (e) {
+      setCnDownloadMsg((e as Error).message);
+    } finally {
+      setCnDownloading(false);
+    }
+  };
 
   const toggleLora = (name: string) =>
     setLoras((p) => (p.some((l) => l.name === name) ? p.filter((l) => l.name !== name) : [...p, { name, weight: 0.8 }]));
@@ -316,13 +343,14 @@ export default function GeneratePage() {
             </div>
           )}
 
-          {cnModels.length > 0 && (
-            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
               <div className="flex items-center gap-2 text-sm font-medium mb-1">
                 <Network size={15} className="text-[var(--accent)]" /> ControlNet
                 <span className="text-xs text-[var(--fg-subtle)] font-normal ml-auto">structure guidance</span>
               </div>
-              {cnImage ? (
+              {cnModels.length === 0 ? (
+                <p className="text-xs text-[var(--fg-muted)] mt-1">No ControlNet models installed — download a diffusers-format SDXL ControlNet below.</p>
+              ) : cnImage ? (
                 <div className="space-y-2 mt-2">
                   <div className="relative">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -350,8 +378,16 @@ export default function GeneratePage() {
                 </button>
               )}
               <input ref={cnFileRef} type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files?.[0]) loadCn(e.target.files[0]); }} />
+              <div className="mt-2 border-t border-[var(--border)] pt-2">
+                <Field label="Download from HF (diffusers-format SDXL)">
+                  <div className="flex gap-2">
+                    <input className={inp} placeholder="diffusers/controlnet-depth-sdxl-1.0" value={cnRepo} disabled={cnDownloading} onChange={(e) => setCnRepo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") downloadCn(); }} />
+                    <button onClick={downloadCn} disabled={cnDownloading || !cnRepo.trim()} className="text-xs px-3 rounded-lg border border-[var(--border)] text-[var(--fg-muted)] hover:text-[var(--fg)] hover:border-[var(--accent)] disabled:opacity-50 whitespace-nowrap">{cnDownloading ? "Downloading…" : "Get"}</button>
+                  </div>
+                </Field>
+                {cnDownloadMsg && <p className="text-xs text-[var(--fg-subtle)] mt-1">{cnDownloadMsg}</p>}
+              </div>
             </div>
-          )}
 
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
