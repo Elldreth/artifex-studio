@@ -24,6 +24,9 @@ const Body = z.object({
   hiresDenoise: z.number().min(0).max(1).optional(),
   hiresSteps: z.number().int().min(1).max(80).optional(),
   upscaler: z.string().optional(),
+  identityImage: z.string().min(10).optional(),
+  identityMethod: z.string().optional(),
+  identityScale: z.number().min(0).max(1.5).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -38,6 +41,13 @@ export async function POST(req: NextRequest) {
     size: `${b.width}x${b.height}`,
     ...(b.negative && b.negative.trim() ? { negative_prompt: b.negative.trim() } : {}),
     ...(b.loras && b.loras.length ? { loras: b.loras } : {}),
+    ...(b.identityImage
+      ? {
+          identity_image: b.identityImage,
+          ...(b.identityMethod ? { identity_method: b.identityMethod } : {}),
+          ...(b.identityScale != null ? { identity_scale: b.identityScale } : {}),
+        }
+      : {}),
     ...(b.hires && b.hires > 1
       ? {
           hires: b.hires,

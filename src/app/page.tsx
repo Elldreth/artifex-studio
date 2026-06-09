@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon, Layers } from "lucide-react";
+import { Wand2, Shuffle, Lock, LockOpen, Download, ImageIcon, Layers, UserSquare, Upload, X } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { saveItem } from "@/lib/db";
 import { uid } from "@/lib/uid";
 import { usePersistentState } from "@/lib/usePersistentState";
+import { downscaleDataUrl } from "@/lib/image";
 
 interface Options {
   reachable: boolean;
@@ -16,6 +17,7 @@ interface Options {
   defaultSampler?: { sampler?: string; scheduler?: string };
   styles?: { id: string; label: string }[];
   upscalers?: string[];
+  identity?: { id: string; label: string; default_scale?: number; experimental?: boolean }[];
 }
 
 interface Progress {
@@ -54,10 +56,18 @@ export default function GeneratePage() {
   const [hiresDenoise, setHiresDenoise] = usePersistentState("artifex:gen:hiresDenoise", 0.4);
   const [hiresSteps, setHiresSteps] = usePersistentState("artifex:gen:hiresSteps", 20);
   const [upscaler, setUpscaler] = usePersistentState("artifex:gen:upscaler", "");
+  const [refImage, setRefImage] = useState<string | null>(null);
+  const [identityMethod, setIdentityMethod] = usePersistentState("artifex:gen:idMethod", "");
+  const [identityScale, setIdentityScale] = usePersistentState("artifex:gen:idScale", 0.5);
+  const [batch, setBatch] = usePersistentState("artifex:gen:batch", 1);
+  const [presets, setPresets] = usePersistentState<Record<string, Record<string, unknown>>>("artifex:gen:presets", {});
+  const refFileRef = useRef<HTMLInputElement>(null);
 
   const [busy, setBusy] = useState(false);
   const [prog, setProg] = useState<Progress | null>(null);
+  const [batchInfo, setBatchInfo] = useState("");
   const [image, setImage] = useState<string | null>(null);
+  const [batchImages, setBatchImages] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState(false);
 
   useEffect(() => {
@@ -69,6 +79,7 @@ export default function GeneratePage() {
         setModel((c) => c || d.models?.[0] || "");
         setSampler((c) => c || d.defaultSampler?.sampler || "");
         setScheduler((c) => c || d.defaultSampler?.scheduler || "");
+        setIdentityMethod((c) => c || d.identity?.[0]?.id || "");
       })
       .catch(() => setOpt({ reachable: false }));
     fetch("/api/artifex/loras", { cache: "no-store" })
@@ -98,40 +109,72 @@ export default function GeneratePage() {
   const generate = useCallback(async () => {
     if (!model) { toast.error("Pick a model"); return; }
     if (!prompt.trim()) { toast.error("Enter a prompt"); return; }
-    const usedSeed = seedLocked && seed.trim() !== "" ? Number(seed) : Math.floor(Math.random() * 2_000_000_000);
-    if (!seedLocked) setSeed(String(usedSeed));
-    setBusy(true); setProg(null); setImage(null);
+    const baseSeed = seedLocked && seed.trim() !== "" ? Number(seed) : null;
+    const count = Math.max(1, Math.min(8, batch));
+    setBusy(true); setProg(null); setImage(null); setBatchImages([]);
+    // IP-Adapter reference: downscale once (modest res is plenty).
+    const ref = refImage ? await downscaleDataUrl(refImage, 768, 0.92) : null;
+    const collected: string[] = [];
     try {
-      const r = await fetch("/api/artifex/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model, prompt, negative, style: style || undefined,
-          sampler: sampler || undefined, scheduler: scheduler || undefined,
-          steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed,
-          loras: loras.length ? loras : undefined,
-          ...(hiresOn ? { hires, hiresDenoise, hiresSteps, upscaler: upscaler || undefined } : {}),
-        }),
-      });
-      const d = await r.json();
-      if (!r.ok) throw new Error(d.error ?? "generation failed");
-      setImage(d.image);
-      saveItem({
-        id: uid(), dataUrl: d.image, prompt, negative, model,
-        settings: { style, sampler, scheduler, steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed, loras: loras.map((l) => `${l.name}:${l.weight}`).join(", ") || undefined, ...(hiresOn ? { hires: `${hires}x` } : {}) },
-        ts: Date.now(),
-      }).catch((e) => console.error("history save failed", e));
-      toast.success("Generated");
+      for (let i = 0; i < count; i++) {
+        if (count > 1) setBatchInfo(`${i + 1}/${count}`);
+        const usedSeed = baseSeed != null ? baseSeed + i : Math.floor(Math.random() * 2_000_000_000);
+        if (i === 0 && !seedLocked) setSeed(String(usedSeed));
+        const r = await fetch("/api/artifex/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model, prompt, negative, style: style || undefined,
+            sampler: sampler || undefined, scheduler: scheduler || undefined,
+            steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed,
+            loras: loras.length ? loras : undefined,
+            ...(hiresOn ? { hires, hiresDenoise, hiresSteps, upscaler: upscaler || undefined } : {}),
+            ...(ref ? { identityImage: ref, identityMethod: identityMethod || undefined, identityScale } : {}),
+          }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error ?? "generation failed");
+        setImage(d.image);
+        collected.push(d.image);
+        setBatchImages([...collected]);
+        saveItem({
+          id: uid(), dataUrl: d.image, prompt, negative, model,
+          settings: { style, sampler, scheduler, steps, cfg, width: aspect.w, height: aspect.h, seed: usedSeed, loras: loras.map((l) => `${l.name}:${l.weight}`).join(", ") || undefined, ...(hiresOn ? { hires: `${hires}x` } : {}), ...(ref ? { identity: identityMethod } : {}) },
+          ts: Date.now(),
+        }).catch((e) => console.error("history save failed", e));
+      }
+      toast.success(count > 1 ? `Generated ${collected.length}` : "Generated");
     } catch (e) {
       const m = (e as Error).message;
       if (/cancel/i.test(m)) toast("Cancelled"); else toast.error(m);
     } finally {
-      setBusy(false); setProg(null);
+      setBusy(false); setProg(null); setBatchInfo("");
     }
-  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras, hiresOn, hires, hiresDenoise, hiresSteps, upscaler]);
+  }, [model, prompt, negative, style, sampler, scheduler, steps, cfg, aspect, seed, seedLocked, loras, hiresOn, hires, hiresDenoise, hiresSteps, upscaler, refImage, identityMethod, identityScale, batch]);
 
   const cancel = () => fetch("/api/artifex/cancel", { method: "POST" }).catch(() => {});
 
+  const loadRef = (f: File) => { const fr = new FileReader(); fr.onload = () => setRefImage(fr.result as string); fr.readAsDataURL(f); };
+
+  const applyPreset = (name: string) => {
+    const p = presets[name];
+    if (!p) return;
+    if (p.prompt != null) setPrompt(String(p.prompt));
+    if (p.negative != null) setNegative(String(p.negative));
+    if (p.style != null) setStyle(String(p.style));
+    if (p.sampler != null) setSampler(String(p.sampler));
+    if (p.scheduler != null) setScheduler(String(p.scheduler));
+    if (p.steps != null) setSteps(Number(p.steps));
+    if (p.cfg != null) setCfg(Number(p.cfg));
+    if (p.aspect) setAspect(p.aspect as (typeof ASPECTS)[number]);
+    toast(`Loaded "${name}"`);
+  };
+  const savePreset = () => {
+    const name = window.prompt("Preset name?")?.trim();
+    if (!name) return;
+    setPresets({ ...presets, [name]: { prompt, negative, style, sampler, scheduler, steps, cfg, aspect } });
+    toast.success(`Saved "${name}"`);
+  };
   const queued = (prog?.inflight ?? 0) > 1;
 
   return (
@@ -147,6 +190,13 @@ export default function GeneratePage() {
       <div className="grid lg:grid-cols-[380px_1fr] gap-5">
         {/* ── Controls ── */}
         <div className="space-y-3">
+          <div className="flex gap-2">
+            <select className={inp} value="" onChange={(e) => { if (e.target.value) applyPreset(e.target.value); }}>
+              <option value="">{Object.keys(presets).length ? "Load preset…" : "No presets yet"}</option>
+              {Object.keys(presets).map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button onClick={savePreset} title="Save current settings as a preset" className="shrink-0 px-3 rounded-lg border border-[var(--border)] text-sm text-[var(--fg-muted)] hover:text-[var(--fg)] hover:border-[var(--accent)]">Save</button>
+          </div>
           <Field label="Model">
             <select className={inp} value={model} onChange={(e) => setModel(e.target.value)}>
               {(opt?.models ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
@@ -204,6 +254,40 @@ export default function GeneratePage() {
               </button>
             </div>
           </Field>
+
+          <Field label={`Batch · ${batch} image${batch > 1 ? "s" : ""}`}>
+            <input type="range" min={1} max={8} value={batch} onChange={(e) => setBatch(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+          </Field>
+
+          {(opt?.identity?.length ?? 0) > 0 && (
+            <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
+              <div className="flex items-center gap-2 text-sm font-medium mb-1">
+                <UserSquare size={15} className="text-[var(--accent)]" /> Reference image
+                <span className="text-xs text-[var(--fg-subtle)] font-normal ml-auto">character consistency</span>
+              </div>
+              {refImage ? (
+                <div className="flex gap-3 items-start mt-2">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={refImage} alt="reference" className="w-16 h-16 object-cover rounded shrink-0" />
+                  <div className="flex-1 space-y-2 min-w-0">
+                    <select className={inp} value={identityMethod} onChange={(e) => setIdentityMethod(e.target.value)}>
+                      {(opt?.identity ?? []).map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                    </select>
+                    <Field label={`Strength · ${identityScale}`}>
+                      <input type="range" min={0.1} max={1.2} step={0.05} value={identityScale} onChange={(e) => setIdentityScale(Number(e.target.value))} className="w-full accent-[var(--accent)]" />
+                    </Field>
+                  </div>
+                  <button onClick={() => setRefImage(null)} className="text-[var(--fg-muted)] hover:text-[var(--danger)] p-1"><X size={15} /></button>
+                </div>
+              ) : (
+                <button onClick={() => refFileRef.current?.click()} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) loadRef(f); }}
+                  className="w-full mt-1 rounded-lg border border-dashed border-[var(--border)] py-4 text-xs text-[var(--fg-muted)] hover:border-[var(--accent)] flex flex-col items-center gap-1">
+                  <Upload size={16} /> Drop / click a face or character reference
+                </button>
+              )}
+              <input ref={refFileRef} type="file" accept="image/*" hidden onChange={(e) => { if (e.target.files?.[0]) loadRef(e.target.files[0]); }} />
+            </div>
+          )}
 
           <div className="rounded-lg border border-[var(--border)] bg-[var(--bg-elevated)] p-3">
             <label className="flex items-center gap-2 text-sm cursor-pointer">
@@ -267,6 +351,7 @@ export default function GeneratePage() {
           {busy ? (
             <div className="w-full max-w-sm text-center">
               <div className="text-sm text-[var(--fg-muted)] mb-2">
+                {batchInfo ? `Image ${batchInfo} · ` : ""}
                 {queued ? `Queued · ${(prog!.inflight! - 1)} ahead` : (prog?.stage ?? "Starting…")}
                 {prog?.steps ? ` · ${prog.step}/${prog.steps}` : ""}
               </div>
@@ -289,6 +374,17 @@ export default function GeneratePage() {
                   <Download size={15} /> Download
                 </a>
               </div>
+              {batchImages.length > 1 && (
+                <div className="flex flex-wrap gap-2 mt-3 justify-center">
+                  {batchImages.map((img, i) => (
+                    <button key={i} onClick={() => setImage(img)}
+                      className={`w-16 h-16 rounded-lg overflow-hidden border ${img === image ? "border-[var(--accent)] ring-2 ring-[var(--accent-ring)]" : "border-[var(--border)]"}`}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="text-center text-[var(--fg-subtle)]">

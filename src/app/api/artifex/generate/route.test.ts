@@ -30,6 +30,15 @@ describe("POST /api/artifex/generate", () => {
     expect(sent.prompt).toContain("--steps 30");
   });
 
+  it("forwards the IP-Adapter reference fields", async () => {
+    mockFetch.mockResolvedValue(new Response(JSON.stringify({ data: [{ b64_json: "AAA" }] }), { status: 200 }));
+    await POST(req({ model: "m", prompt: "cat", width: 1024, height: 1024, identityImage: "data:image/png;base64,zzzz", identityMethod: "ipadapter", identityScale: 0.6 }));
+    const sent = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+    expect(sent.identity_image).toBe("data:image/png;base64,zzzz");
+    expect(sent.identity_method).toBe("ipadapter");
+    expect(sent.identity_scale).toBe(0.6);
+  });
+
   it("surfaces an engine error as 502", async () => {
     mockFetch.mockResolvedValue(new Response(JSON.stringify({ error: { message: "boom" } }), { status: 500 }));
     const r = await POST(req({ model: "m", prompt: "cat", width: 1024, height: 1024 }));
